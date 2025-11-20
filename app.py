@@ -8,7 +8,7 @@ from datetime import datetime, date
 # 1. 页面设置
 # ---------------------------------------------------------
 st.set_page_config(page_title="我的股票操盘系统", layout="wide", page_icon="📈")
-st.title("📈 股票投资组合管理系统 (Pro V5.0)")
+st.title("📈 股票投资组合管理系统 (Pro V5.1)")
 
 # ---------------------------------------------------------
 # 2. 状态初始化
@@ -94,7 +94,7 @@ def get_portfolio_data():
     
     df['Net Weight'] = df.apply(lambda x: x['Market Value'] / total_value if total_value > 0 else 0, axis=1)
     
-    # 容错处理：确保 Beta 存在
+    # 容错处理
     if 'Beta' not in df.columns: df['Beta'] = 1.0
     portfolio_beta = (df['Beta'] * df['Net Weight']).sum()
 
@@ -117,19 +117,15 @@ if edit_mode:
     # --- 编辑模式 ---
     st.warning("⚠️ 编辑模式：你可以直接在下方表格修改数据，或选中行并按 Delete 键删除股票。修改后会自动保存。")
     
-    # 将当前 Session State 转换为 DataFrame 供编辑
-    # 只展示核心输入字段，不展示计算字段（如 PnL）
     raw_df = pd.DataFrame(st.session_state.portfolio)
     
-    # 确保列的顺序
     default_cols = ["Account", "Ticker", "Shares", "Entry Price", "Enter Date", "Price Target", "Loss Limit", "Beta", "Sector"]
-    # 补齐可能缺失的列
     for c in default_cols:
         if c not in raw_df.columns: raw_df[c] = None
             
     edited_df = st.data_editor(
         raw_df[default_cols],
-        num_rows="dynamic", # 允许添加和删除行
+        num_rows="dynamic",
         use_container_width=True,
         key="editor",
         column_config={
@@ -139,18 +135,13 @@ if edit_mode:
         }
     )
     
-    # 当用户修改表格时，同步回 session_state
-    # 将编辑后的 DF 转回 list of dicts
     if not edited_df.equals(raw_df[default_cols]):
-        # 简单的转换逻辑
         new_portfolio = edited_df.to_dict('records')
         st.session_state.portfolio = new_portfolio
         st.rerun()
 
 else:
     # --- 视图模式 (Dashboard) ---
-    
-    # 计算数据
     df_display, total_val, total_unrealized, port_beta = get_portfolio_data()
     
     # 顶部指标
@@ -187,7 +178,7 @@ else:
             }
         )
         
-        # 卖出操作区 (只在非空时显示)
+        # 卖出操作区
         st.markdown("---")
         with st.expander("📉 卖出 / 减仓操作台", expanded=False):
             c_sell1, c_sell2, c_sell3 = st.columns([2, 2, 1])
@@ -197,13 +188,11 @@ else:
             sell_shares = c_sell2.number_input(f"卖出数量 (Max: {max_shares})", min_value=1, max_value=max_shares, value=max_shares)
             
             if c_sell3.button("确认卖出", type="primary", use_container_width=True):
-                # 执行卖出逻辑
                 for i, item in enumerate(st.session_state.portfolio):
                     if item['Ticker'] == sell_ticker:
                         exit_price = current_holding['Last Price']
                         realized_pnl = (exit_price - item['Entry Price']) * sell_shares
                         
-                        # 记录历史
                         hist_item = item.copy()
                         hist_item['Shares'] = sell_shares
                         hist_item['Exit Price'] = exit_price
@@ -211,7 +200,6 @@ else:
                         hist_item['Realized PnL'] = realized_pnl
                         st.session_state.history.append(hist_item)
                         
-                        # 更新持仓
                         if sell_shares == item['Shares']:
                             st.session_state.portfolio.pop(i)
                         else:
@@ -220,7 +208,6 @@ else:
                         st.success(f"已卖出 {sell_ticker}")
                         st.rerun()
                         break
-
     else:
         st.info("📭 当前没有持仓。请打开右上角的【编辑模式】手动录入，或使用侧边栏添加。")
 
@@ -253,6 +240,7 @@ if st.session_state.history:
         
         undo_opts = [f"{i}: {r['Ticker']} - {r['Shares']}股" for i, r in hist_df.iterrows()]
         undo_sel = st.selectbox("选择撤销记录", undo_opts)
+        
         if st.button("撤销此交易"):
             idx = int(undo_sel.split(":")[0])
             item = st.session_state.history[idx]
@@ -263,5 +251,12 @@ if st.session_state.history:
                     p['Shares'] += item['Shares']
                     found = True
             if not found:
+                # 关键修复：将原来的长行代码拆分为多行，防止复制出错
                 rev_item = item.copy()
-                del rev_item['Exit
+                if 'Exit Price' in rev_item: del rev_item['Exit Price']
+                if 'Exit Date' in rev_item: del rev_item['Exit Date']
+                if 'Realized PnL' in rev_item: del rev_item['Realized PnL']
+                st.session_state.portfolio.append(rev_item)
+            
+            st.session_state.history.pop(idx)
+            st.rerun()
